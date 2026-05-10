@@ -1,0 +1,40 @@
+# ── Etapa 1: Build ────────────────────────────────────────────────
+# Usamos Node.js 20 Alpine — Alpine es una versión minimalista de Linux
+FROM node:20-alpine AS build
+WORKDIR /app
+
+# Copiamos package.json y package-lock.json primero
+# Si no cambian, Docker usa cache y no reinstala dependencias
+COPY package*.json ./
+
+# Instalamos todas las dependencias (incluyendo devDependencies para compilar)
+RUN npm ci
+
+# Copiamos el resto del código fuente
+COPY . .
+
+# Compilamos TypeScript a JavaScript
+RUN npm run build
+
+# ── Etapa 2: Runtime ─────────────────────────────────────────────
+# Nueva imagen limpia — sin código fuente ni devDependencies
+FROM node:20-alpine AS runtime
+WORKDIR /app
+
+# Copiamos solo lo necesario para producción
+COPY package*.json ./
+
+# Instalamos SOLO dependencias de producción
+RUN npm ci --only=production
+
+# Copiamos el código compilado de la etapa anterior
+COPY --from=build /app/dist ./dist
+
+# Puerto que expone la API
+EXPOSE 3001
+
+# Variable de entorno
+ENV NODE_ENV=production
+
+# Comando para iniciar la aplicación
+CMD ["node", "dist/main.js"]

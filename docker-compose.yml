@@ -1,0 +1,203 @@
+version: '3.8'
+
+networks:
+  microservices-net:
+    driver: bridge
+
+services:
+
+  # ── BD Master 1 — Inventarios (.NET) ─────────────────────────────
+  mysql-master-inventarios:
+    image: mysql:8.0
+    container_name: mysql-master-inventarios
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root1234
+      MYSQL_DATABASE: inventarios_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-master-inventarios-data:/var/lib/mysql
+      - ./mysql/master/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot1234"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ── BD Master 2 — Productos (NestJS) ─────────────────────────────
+  mysql-master-productos:
+    image: mysql:8.0
+    container_name: mysql-master-productos
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root1234
+      MYSQL_DATABASE: productos_db
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-master-productos-data:/var/lib/mysql
+      - ./mysql/master-productos/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot1234"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ── BD Replica — Solo lectura, ambas BDs ─────────────────────────
+  mysql-replica:
+    image: mysql:8.0
+    container_name: mysql-replica
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root1234
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql-replica-data:/var/lib/mysql
+      - ./mysql/replica/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - microservices-net
+    depends_on:
+      mysql-master-inventarios:
+        condition: service_healthy
+      mysql-master-productos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot1234"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ── Configurador de Replicación ───────────────────────────────────
+  # Se ejecuta UNA sola vez al levantar y configura ambas réplicas
+  replication-setup:
+    image: mysql:8.0
+    container_name: replication-setup
+    restart: "no"
+    networks:
+      - microservices-net
+    depends_on:
+      mysql-master-inventarios:
+        condition: service_healthy
+      mysql-master-productos:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo '=====================================' &&
+        echo 'Iniciando configuracion de replicacion' &&
+        echo '=====================================' &&
+
+        echo '1. Creando usuario de replicacion en Master Inventarios...' &&
+        mysql -h mysql-master-inventarios -uroot -proot1234 -e \"
+          CREATE USER IF NOT EXISTS 'replica_user'@'%'
+            IDENTIFIED WITH mysql_native_password BY 'replica1234';
+          GRANT REPLICATION SLAVE ON *.* TO 'replica_user'@'%';
+          FLUSH PRIVILEGES;
+        \" &&
+
+        echo '2. Creando usuario de replicacion en Master Productos...' &&
+        mysql -h mysql-master-productos -uroot -proot1234 -e \"
+          CREATE USER IF NOT EXISTS 'replica_user'@'%'
+            IDENTIFIED WITH mysql_native_password BY 'replica1234';
+          GRANT REPLICATION SLAVE ON *.* TO 'replica_user'@'%';
+          FLUSH PRIVILEGES;
+        \" &&
+
+        echo '3. Obteniendo posicion del Master Inventarios...' &&
+        INV_FILE=\$\$(mysql -h mysql-master-inventarios -uroot -proot1234
+          -e 'SHOW MASTER STATUS' --batch --skip-column-names | awk '{print \$\$1}') &&
+        INV_POS=\$\$(mysql -h mysql-master-inventarios -uroot -proot1234
+          -e 'SHOW MASTER STATUS' --batch --skip-column-names | awk '{print \$\$2}') &&
+        echo \"   File: \$\$INV_FILE  Position: \$\$INV_POS\" &&
+
+        echo '4. Configurando replica para Inventarios...' &&
+        mysql -h mysql-replica -uroot -proot1234 -e \"
+          STOP REPLICA;
+          CHANGE REPLICATION SOURCE TO
+            SOURCE_HOST='mysql-master-inventarios',
+            SOURCE_PORT=3306,
+            SOURCE_USER='replica_user',
+            SOURCE_PASSWORD='replica1234',
+            SOURCE_LOG_FILE='\$\$INV_FILE',
+            SOURCE_LOG_POS=\$\$INV_POS;
+          START REPLICA;
+        \" &&
+
+        echo '5. Verificando estado de la replica...' &&
+        sleep 5 &&
+        mysql -h mysql-replica -uroot -proot1234
+          -e 'SHOW REPLICA STATUS\G' | grep -E 'Running|Error|Behind' &&
+
+        echo '=====================================' &&
+        echo 'Replicacion configurada exitosamente' &&
+        echo '=====================================' &&
+        echo 'NOTA: Si la replica se detiene, las APIs' &&
+        echo 'devuelven 404 controlado sin tronar.'
+      "
+
+  # ── API .NET Inventarios ──────────────────────────────────────────
+  inventarios-api:
+    build:
+      context: ./Inventarios.Api
+      dockerfile: Dockerfile
+    container_name: inventarios-api
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Server=mysql-master-inventarios;Port=3306;Database=inventarios_db;User=root;Password=root1234;CharSet=utf8mb4;
+      - ConnectionStrings__ReplicaConnection=Server=mysql-replica;Port=3306;Database=inventarios_db;User=root;Password=root1234;CharSet=utf8mb4;
+      - Jwt__SecretKey=TU_CLAVE_SUPER_SECRETA_MINIMO_32_CARACTERES_AQUI_2024!
+      - Jwt__Issuer=Inventarios.Api
+      - Jwt__Audience=Inventarios.Client
+      - Jwt__ExpirationHours=8
+    networks:
+      - microservices-net
+    depends_on:
+      mysql-master-inventarios:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+
+  # ── API NestJS Productos ──────────────────────────────────────────
+  productos-api:
+    build:
+      context: ./Inventarios.Api.Nest/productos.api
+      dockerfile: Dockerfile
+    container_name: productos-api
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=mysql-master-productos
+      - DB_PORT=3306
+      - DB_USERNAME=root
+      - DB_PASSWORD=root1234
+      - DB_DATABASE=productos_db
+      - DB_REPLICA_HOST=mysql-replica
+      - DB_REPLICA_PORT=3306
+      - DB_REPLICA_DATABASE=productos_db
+      - JWT_SECRET=PRODUCTOS_API_CLAVE_SECRETA_MINIMO_32_CARACTERES_2024!
+      - JWT_EXPIRATION=8h
+      - PORT=3001
+    networks:
+      - microservices-net
+    depends_on:
+      mysql-master-productos:
+        condition: service_healthy
+      mysql-replica:
+        condition: service_healthy
+
+volumes:
+  mysql-master-inventarios-data:
+  mysql-master-productos-data:
+  mysql-replica-data:
