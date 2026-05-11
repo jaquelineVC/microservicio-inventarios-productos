@@ -2,6 +2,7 @@ using System.Text;
 using AspNetCoreRateLimit;
 using Inventarios.api.Application;
 using Inventarios.api.Infraestructure;
+using Inventarios.api.Infraestructure.Context;
 using Inventarios.api.Infraestructure.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -10,17 +11,18 @@ using Inventarios.api.BackgroundServices;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Capas Clean Architecture ──────────────────────────────────────────────────
+// ── Capas Clean Architecture ──────────────────────────────────────
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// ── Rate Limiting (protección DDoS y Fuerza Bruta) ───────────────────────────
+// ── Rate Limiting ─────────────────────────────────────────────────
 builder.Services.AddMemoryCache();
-builder.Services.Configure<IpRateLimitOptions>(builder.Configuration.GetSection("IpRateLimiting"));
+builder.Services.Configure<IpRateLimitOptions>(
+    builder.Configuration.GetSection("IpRateLimiting"));
 builder.Services.AddInMemoryRateLimiting();
 builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
 
-// ── JWT Authentication ────────────────────────────────────────────────────────
+// ── JWT Authentication ────────────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:SecretKey"]
     ?? throw new InvalidOperationException("JWT SecretKey no configurada.");
 
@@ -60,27 +62,27 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// ── CORS ──
+// ── CORS ──────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("DefaultPolicy", policy =>
     {
         policy.WithOrigins(
-                "http://localhost:4200",   // Angular dev
-                "http://localhost:5210")   // Swagger dev
+                "http://localhost:4200",
+                "http://localhost:5210")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
     });
 });
 
-// ── Controllers ────
+// ── Controllers ───────────────────────────────────────────────────
 builder.Services.AddControllers(options =>
 {
     options.ReturnHttpNotAcceptable = true;
 });
 
-// ── Swagger con soporte JWT ───
+// ── Swagger ───────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -117,11 +119,28 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+// ── Segundo Plano ─────────────────────────────────────────────────
+builder.Services.AddHostedService<LoginCleanerService>();
+
 var app = builder.Build();
 
-// ── Pipeline de Middleware (orden importa) ────────────────────────────────────
+// ── Inicializar BD ────────────────────────────────────────────────
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var context = scope.ServiceProvider
+            .GetRequiredService<AppDbContext>();
+        await context.Database.EnsureCreatedAsync();
+        Console.WriteLine("✅ Base de datos inicializada correctamente.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error al inicializar BD: {ex.Message}");
+    }
+}
 
-// 1. Swagger PRIMERO — antes de cualquier middleware que pueda bloquearlo
+// ── Pipeline de Middleware ────────────────────────────────────────
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -132,35 +151,16 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Cross Cutting — Manejo de excepciones global
 app.UseMiddleware<GlobalExceptionMiddleware>();
-
-// 2. Rate limiting
 app.UseIpRateLimiting();
-
-// 3. Headers de seguridad
 app.UseMiddleware<SecurityHeadersMiddleware>();
-
-// 4. Sanitización
 app.UseMiddleware<SanitizationMiddleware>();
-
-// 5. HTTPS
 app.UseHttpsRedirection();
-
-// 6. CORS
 app.UseCors("DefaultPolicy");
-
-// 7. Auth
 app.UseAuthentication();
 app.UseAuthorization();
-
-// 8. Controllers
 app.MapControllers();
 
 await app.RunAsync();
 
-// ── Segundo Plano — Limpiador de intentos fallidos ────────────────
-builder.Services.AddHostedService<LoginCleanerService>();
-
 public partial class Program { }
-

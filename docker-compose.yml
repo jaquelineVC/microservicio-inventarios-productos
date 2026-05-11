@@ -14,11 +14,18 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root1234
       MYSQL_DATABASE: inventarios_db
+      MYSQL_ROOT_HOST: '%'
+    command: >
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=OFF
+      --log-replica-updates=ON
     ports:
       - "3306:3306"
     volumes:
       - mysql-master-inventarios-data:/var/lib/mysql
-      - ./mysql/master/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./mysql/init:/docker-entrypoint-initdb.d
     networks:
       - microservices-net
     healthcheck:
@@ -35,11 +42,18 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root1234
       MYSQL_DATABASE: productos_db
+      MYSQL_ROOT_HOST: '%'
+    command: >
+      --server-id=3
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=OFF
+      --log-replica-updates=ON
     ports:
       - "3307:3306"
     volumes:
       - mysql-master-productos-data:/var/lib/mysql
-      - ./mysql/master-productos/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./mysql/init:/docker-entrypoint-initdb.d
     networks:
       - microservices-net
     healthcheck:
@@ -55,11 +69,17 @@ services:
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: root1234
+      MYSQL_ROOT_HOST: '%'
+    command: >
+      --server-id=2
+      --relay-log=relay-bin
+      --gtid-mode=OFF
+      --log-replica-updates=ON
+      --read-only=1
     ports:
       - "3308:3306"
     volumes:
       - mysql-replica-data:/var/lib/mysql
-      - ./mysql/replica/my.cnf:/etc/mysql/conf.d/my.cnf
     networks:
       - microservices-net
     depends_on:
@@ -72,6 +92,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 15
+      start_period: 30s
 
   # ── Configurador de Replicación ───────────────────────────────────
   # Se ejecuta UNA sola vez al levantar y configura ambas réplicas
@@ -88,59 +109,9 @@ services:
         condition: service_healthy
       mysql-replica:
         condition: service_healthy
-    command: >
-      bash -c "
-        echo '=====================================' &&
-        echo 'Iniciando configuracion de replicacion' &&
-        echo '=====================================' &&
-
-        echo '1. Creando usuario de replicacion en Master Inventarios...' &&
-        mysql -h mysql-master-inventarios -uroot -proot1234 -e \"
-          CREATE USER IF NOT EXISTS 'replica_user'@'%'
-            IDENTIFIED WITH mysql_native_password BY 'replica1234';
-          GRANT REPLICATION SLAVE ON *.* TO 'replica_user'@'%';
-          FLUSH PRIVILEGES;
-        \" &&
-
-        echo '2. Creando usuario de replicacion en Master Productos...' &&
-        mysql -h mysql-master-productos -uroot -proot1234 -e \"
-          CREATE USER IF NOT EXISTS 'replica_user'@'%'
-            IDENTIFIED WITH mysql_native_password BY 'replica1234';
-          GRANT REPLICATION SLAVE ON *.* TO 'replica_user'@'%';
-          FLUSH PRIVILEGES;
-        \" &&
-
-        echo '3. Obteniendo posicion del Master Inventarios...' &&
-        INV_FILE=\$\$(mysql -h mysql-master-inventarios -uroot -proot1234
-          -e 'SHOW MASTER STATUS' --batch --skip-column-names | awk '{print \$\$1}') &&
-        INV_POS=\$\$(mysql -h mysql-master-inventarios -uroot -proot1234
-          -e 'SHOW MASTER STATUS' --batch --skip-column-names | awk '{print \$\$2}') &&
-        echo \"   File: \$\$INV_FILE  Position: \$\$INV_POS\" &&
-
-        echo '4. Configurando replica para Inventarios...' &&
-        mysql -h mysql-replica -uroot -proot1234 -e \"
-          STOP REPLICA;
-          CHANGE REPLICATION SOURCE TO
-            SOURCE_HOST='mysql-master-inventarios',
-            SOURCE_PORT=3306,
-            SOURCE_USER='replica_user',
-            SOURCE_PASSWORD='replica1234',
-            SOURCE_LOG_FILE='\$\$INV_FILE',
-            SOURCE_LOG_POS=\$\$INV_POS;
-          START REPLICA;
-        \" &&
-
-        echo '5. Verificando estado de la replica...' &&
-        sleep 5 &&
-        mysql -h mysql-replica -uroot -proot1234
-          -e 'SHOW REPLICA STATUS\G' | grep -E 'Running|Error|Behind' &&
-
-        echo '=====================================' &&
-        echo 'Replicacion configurada exitosamente' &&
-        echo '=====================================' &&
-        echo 'NOTA: Si la replica se detiene, las APIs' &&
-        echo 'devuelven 404 controlado sin tronar.'
-      "
+    volumes:
+      - ./mysql/init:/scripts
+    command: bash /scripts/setup-replication.sh
 
   # ── API .NET Inventarios ──────────────────────────────────────────
   inventarios-api:
@@ -166,6 +137,8 @@ services:
         condition: service_healthy
       mysql-replica:
         condition: service_healthy
+      replication-setup:
+        condition: service_completed_successfully
 
   # ── API NestJS Productos ──────────────────────────────────────────
   productos-api:
@@ -196,7 +169,8 @@ services:
         condition: service_healthy
       mysql-replica:
         condition: service_healthy
-
+      replication-setup:
+        condition: service_completed_successfully
 volumes:
   mysql-master-inventarios-data:
   mysql-master-productos-data:

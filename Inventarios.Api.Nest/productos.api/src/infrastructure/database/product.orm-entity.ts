@@ -14,7 +14,7 @@ export class ProductOrmEntity {
   @Column({ length: 150 })
   name!: string;
 
-  @Column({ type: 'text', default: '' })
+  @Column({ type: 'text', nullable: true })
   description!: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
