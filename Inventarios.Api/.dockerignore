@@ -6,3 +6,4 @@ TestResults/
 coverage/
 **/*.Tests/
 .env
+HashGenerator/
