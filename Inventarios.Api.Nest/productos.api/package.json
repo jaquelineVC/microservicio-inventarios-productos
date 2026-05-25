@@ -17,7 +17,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:unit": "jest --testPathPatterns test/domain test/roles.guard test/get-all-products src/app.controller",
+    "test:integration": "jest --testPathPattern=\"test/auth|test/categories|test/suppliers|test/products|test/clients|test/quotations\""
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
