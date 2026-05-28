@@ -1,0 +1,47 @@
+name: Variables y Configuracion
+
+on:
+  workflow_call:
+    outputs:
+      app_name:
+        description: "Nombre de la aplicacion"
+        value: ${{ jobs.mostrar-variables.outputs.app_name }}
+      dotnet_version:
+        description: "Version de .NET"
+        value: ${{ jobs.mostrar-variables.outputs.dotnet_version }}
+      node_version:
+        description: "Version de Node"
+        value: ${{ jobs.mostrar-variables.outputs.node_version }}
+
+jobs:
+  mostrar-variables:
+    name: Mostrar Variables del Proyecto
+    runs-on: ubuntu-latest
+
+    outputs:
+      app_name: ${{ steps.set-vars.outputs.app_name }}
+      dotnet_version: ${{ steps.set-vars.outputs.dotnet_version }}
+      node_version: ${{ steps.set-vars.outputs.node_version }}
+
+    steps:
+      - name: Mostrar Variables Todas
+        env:
+          mensaje: Iniciando pipeline de CI/CD
+        run: |
+          echo "Aplicacion: ${{ vars.APP_NAME }}"
+          echo "Version .NET: ${{ vars.DOTNET_VERSION }}"
+          echo "Version Node: ${{ vars.NODE_VERSION }}"
+          echo $mensaje
+
+      - name: Crear Variable local
+        run: echo "framework=NET.8" >> $GITHUB_ENV
+
+      - name: Usar Variable local
+        run: echo $framework
+
+      - name: Exportar variables como outputs
+        id: set-vars
+        run: |
+          echo "app_name=${{ vars.APP_NAME }}" >> $GITHUB_OUTPUT
+          echo "dotnet_version=${{ vars.DOTNET_VERSION }}" >> $GITHUB_OUTPUT
+          echo "node_version=${{ vars.NODE_VERSION }}" >> $GITHUB_OUTPUT

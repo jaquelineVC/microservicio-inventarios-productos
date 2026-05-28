@@ -7,48 +7,35 @@ on:
     branches: [ main ]
 
 env:
-  TipoEjecucion: 'Integracion Continua'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
 
-  # ── Mostrar Variables ─────────────────────────────────────────────
-  mostrar-variables:
-    name: Mostrar Variables del Proyecto
-    runs-on: ubuntu-latest
-    steps:
-      - name: Mostrar Variables Todas
-        env:
-          mensaje: Iniciando pipeline de CI/CD
-        run: |
-          echo "Aplicacion: ${{ vars.APP_NAME }}"
-          echo "Version .NET: ${{ vars.DOTNET_VERSION }}"
-          echo "Version Node: ${{ vars.NODE_VERSION }}"
-          echo "Tipo Ejecucion: $TipoEjecucion"
-          echo $mensaje
-
-      - name: Crear Variable
-        run: echo "framework=NET.8" >> $GITHUB_ENV
-
-      - name: Usar Variable
-        run: echo $framework
-
-      - name: Revision de código
-        uses: actions/checkout@v4
+  # ── Llama al workflow reutilizable ────────────────────────────────
+  configuracion:
+    name: Configuracion y Variables
+    uses: ./.github/workflows/variables.yml
+    secrets: inherit
 
   # ── Build y Pruebas .NET ──────────────────────────────────────────
   build-dotnet:
     name: Build y Pruebas .NET 8
     runs-on: ubuntu-latest
-    needs: mostrar-variables
+    needs: configuracion
 
     steps:
+      - name: Mostrar version recibida del workflow reutilizable
+        run: |
+          echo "App: ${{ needs.configuracion.outputs.app_name }}"
+          echo "Version .NET: ${{ needs.configuracion.outputs.dotnet_version }}"
+
       - name: Revision de código
         uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ vars.DOTNET_VERSION }}
+          dotnet-version: ${{ needs.configuracion.outputs.dotnet_version }}
 
       - name: Restaurar dependencias
         run: dotnet restore ./Inventarios.Api/Inventarios.api.sln
@@ -72,30 +59,21 @@ jobs:
   build-nestjs:
     name: Build y Pruebas NestJS 11
     runs-on: ubuntu-latest
-    needs: mostrar-variables
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root1234
-          MYSQL_DATABASE: productos_db
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost -uroot -proot1234"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
+    needs: configuracion
 
     steps:
+      - name: Mostrar version recibida del workflow reutilizable
+        run: |
+          echo "App: ${{ needs.configuracion.outputs.app_name }}"
+          echo "Version Node: ${{ needs.configuracion.outputs.node_version }}"
+
       - name: Revision de código
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ vars.NODE_VERSION }}
+          node-version: ${{ needs.configuracion.outputs.node_version }}
           cache: 'npm'
           cache-dependency-path: Inventarios.Api.Nest/productos.api/package-lock.json
 
@@ -124,7 +102,7 @@ jobs:
           PORT: 3001
           NODE_ENV: test
 
-  # ── Build Docker Images ───────────────────────────────────────────
+  # ── Build Docker ──────────────────────────────────────────────────
   build-docker:
     name: Build Docker Images
     runs-on: ubuntu-latest
