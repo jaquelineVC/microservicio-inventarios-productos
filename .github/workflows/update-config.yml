@@ -2,13 +2,6 @@ name: Actualizar Configuracion
 
 on:
   workflow_call:
-    inputs:
-      connection_string:
-        required: true
-        type: string
-      jwt_secret:
-        required: true
-        type: string
 
 jobs:
   update-config:
@@ -21,33 +14,22 @@ jobs:
 
       - name: Reemplazar DefaultConnection en appsettings.json
         shell: pwsh
+        env:
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET_INVENTARIOS }}
         run: |
-          # Leer el appsettings.json
           $configPath = "./Inventarios.Api/Inventarios.api/appsettings.json"
           $config = Get-Content $configPath -Raw | ConvertFrom-Json
 
-          # Mostrar valor original
           Write-Host "Conexion original: $($config.ConnectionStrings.DefaultConnection)"
 
-          # Reemplazar la cadena de conexion
-          $config.ConnectionStrings.DefaultConnection = "${{ inputs.connection_string }}"
+          $config.ConnectionStrings.DefaultConnection = "Server=localhost;Port=3306;Database=inventarios_db;User=root;Password=$env:MYSQL_PASSWORD;CharSet=utf8mb4;"
+          $config.Jwt.SecretKey = $env:JWT_SECRET
 
-          # Reemplazar JWT Secret
-          $config.Jwt.SecretKey = "${{ inputs.jwt_secret }}"
-
-          # Guardar el archivo actualizado
           $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
 
-          # Mostrar valor nuevo
           $updated = Get-Content $configPath -Raw | ConvertFrom-Json
           Write-Host "Conexion actualizada: $($updated.ConnectionStrings.DefaultConnection)"
-
-      - name: Verificar appsettings.json actualizado
-        shell: pwsh
-        run: |
-          $config = Get-Content "./Inventarios.Api/Inventarios.api/appsettings.json" -Raw | ConvertFrom-Json
-          Write-Host "DefaultConnection: $($config.ConnectionStrings.DefaultConnection)"
-          Write-Host "Issuer: $($config.Jwt.Issuer)"
 
       - name: Subir appsettings modificado como artefacto
         uses: actions/upload-artifact@v4
