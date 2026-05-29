@@ -1,0 +1,56 @@
+name: Actualizar Configuracion
+
+on:
+  workflow_call:
+    inputs:
+      connection_string:
+        required: true
+        type: string
+      jwt_secret:
+        required: true
+        type: string
+
+jobs:
+  update-config:
+    name: Reemplazar cadena de conexion
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Revision de código
+        uses: actions/checkout@v4
+
+      - name: Reemplazar DefaultConnection en appsettings.json
+        shell: pwsh
+        run: |
+          # Leer el appsettings.json
+          $configPath = "./Inventarios.Api/Inventarios.api/appsettings.json"
+          $config = Get-Content $configPath -Raw | ConvertFrom-Json
+
+          # Mostrar valor original
+          Write-Host "Conexion original: $($config.ConnectionStrings.DefaultConnection)"
+
+          # Reemplazar la cadena de conexion
+          $config.ConnectionStrings.DefaultConnection = "${{ inputs.connection_string }}"
+
+          # Reemplazar JWT Secret
+          $config.Jwt.SecretKey = "${{ inputs.jwt_secret }}"
+
+          # Guardar el archivo actualizado
+          $config | ConvertTo-Json -Depth 10 | Set-Content $configPath
+
+          # Mostrar valor nuevo
+          $updated = Get-Content $configPath -Raw | ConvertFrom-Json
+          Write-Host "Conexion actualizada: $($updated.ConnectionStrings.DefaultConnection)"
+
+      - name: Verificar appsettings.json actualizado
+        shell: pwsh
+        run: |
+          $config = Get-Content "./Inventarios.Api/Inventarios.api/appsettings.json" -Raw | ConvertFrom-Json
+          Write-Host "DefaultConnection: $($config.ConnectionStrings.DefaultConnection)"
+          Write-Host "Issuer: $($config.Jwt.Issuer)"
+
+      - name: Subir appsettings modificado como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: appsettings-ci
+          path: ./Inventarios.Api/Inventarios.api/appsettings.json

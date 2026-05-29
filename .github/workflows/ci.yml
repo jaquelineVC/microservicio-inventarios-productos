@@ -11,26 +11,62 @@ env:
 
 jobs:
 
-  # ── Llama al workflow reutilizable ────────────────────────────────
+  # ── Workflow reutilizable — Variables ─────────────────────────────
   configuracion:
     name: Configuracion y Variables
     uses: ./.github/workflows/variables.yml
+    secrets: inherit
+
+  # ── Workflow reutilizable — Actualizar config ─────────────────────
+  actualizar-config:
+    name: Actualizar appsettings.json
+    needs: configuracion
+    uses: ./.github/workflows/update-config.yml
+    with:
+      connection_string: "Server=localhost;Port=3306;Database=inventarios_db;User=root;Password=${{ secrets.MYSQL_ROOT_PASSWORD }};CharSet=utf8mb4;"
+      jwt_secret: ${{ secrets.JWT_SECRET_INVENTARIOS }}
     secrets: inherit
 
   # ── Build y Pruebas .NET ──────────────────────────────────────────
   build-dotnet:
     name: Build y Pruebas .NET 8
     runs-on: ubuntu-latest
-    needs: configuracion
+    needs: [configuracion, actualizar-config]
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_DATABASE: inventarios_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -p${{ secrets.MYSQL_ROOT_PASSWORD }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
 
     steps:
-      - name: Mostrar version recibida del workflow reutilizable
+      - name: Mostrar version recibida
         run: |
           echo "App: ${{ needs.configuracion.outputs.app_name }}"
           echo "Version .NET: ${{ needs.configuracion.outputs.dotnet_version }}"
 
       - name: Revision de código
         uses: actions/checkout@v4
+
+      - name: Descargar appsettings.json actualizado
+        uses: actions/download-artifact@v4
+        with:
+          name: appsettings-ci
+          path: ./Inventarios.Api/Inventarios.api/
+
+      - name: Verificar appsettings descargado
+        shell: pwsh
+        run: |
+          $config = Get-Content "./Inventarios.Api/Inventarios.api/appsettings.json" -Raw | ConvertFrom-Json
+          Write-Host "DefaultConnection: $($config.ConnectionStrings.DefaultConnection)"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -49,11 +85,6 @@ jobs:
             --configuration Release \
             --filter "FullyQualifiedName~UnitTest" \
             --logger "console;verbosity=detailed"
-        env:
-          Jwt__SecretKey: ${{ secrets.JWT_SECRET_INVENTARIOS }}
-          Jwt__Issuer: "Inventarios.Api"
-          Jwt__Audience: "Inventarios.Client"
-          Jwt__ExpirationHours: "8"
 
   # ── Build y Pruebas NestJS ────────────────────────────────────────
   build-nestjs:
@@ -62,7 +93,7 @@ jobs:
     needs: configuracion
 
     steps:
-      - name: Mostrar version recibida del workflow reutilizable
+      - name: Mostrar version recibida
         run: |
           echo "App: ${{ needs.configuracion.outputs.app_name }}"
           echo "Version Node: ${{ needs.configuracion.outputs.node_version }}"
