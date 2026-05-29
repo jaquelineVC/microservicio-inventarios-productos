@@ -23,7 +23,9 @@ jobs:
     needs: configuracion
     uses: ./.github/workflows/update-config.yml
     secrets: inherit
-    
+    with:
+      connection_string: "Server=localhost;Port=3306;Database=inventarios_db;User=root;Password=root1234;CharSet=utf8mb4;"
+      jwt_secret: "placeholder"
 
   # ── Build y Pruebas .NET ──────────────────────────────────────────
   build-dotnet:
