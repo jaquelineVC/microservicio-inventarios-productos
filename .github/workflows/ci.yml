@@ -154,17 +154,17 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./Inventarios.Api
-          dockerfile: ./Inventarios.Api/Dockerfile
+          file: ./Inventarios.Api/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/inventarios-api:latest
+          tags: ghcr.io/jaquelinevc/inventarios-api:latest
 
       - name: Build y Push imagen Productos API
         uses: docker/build-push-action@v5
         with:
           context: ./Inventarios.Api.Nest/productos.api
-          dockerfile: ./Inventarios.Api.Nest/productos.api/dockerfile
+          file: ./Inventarios.Api.Nest/productos.api/dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/productos-api:latest
+          tags: ghcr.io/jaquelinevc/productos-api:latest
 
       - name: Validar docker-compose.yml
         run: docker compose config
@@ -172,5 +172,5 @@ jobs:
       - name: Mostrar imagenes publicadas
         run: |
           echo "Imagenes publicadas en GHCR:"
-          echo "ghcr.io/${{ github.repository_owner }}/inventarios-api:latest"
-          echo "ghcr.io/${{ github.repository_owner }}/productos-api:latest"
+          echo "ghcr.io/jaquelinevc/inventarios-api:latest"
+          echo "ghcr.io/jaquelinevc/productos-api:latest"
