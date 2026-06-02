@@ -166,11 +166,26 @@ jobs:
           push: true
           tags: ghcr.io/jaquelinevc/productos-api:latest
 
-      - name: Validar docker-compose.yml
-        run: docker compose config
-
-      - name: Mostrar imagenes publicadas
+      - name: Validar docker-compose.yml y guardar log
         run: |
-          echo "Imagenes publicadas en GHCR:"
-          echo "ghcr.io/jaquelinevc/inventarios-api:latest"
-          echo "ghcr.io/jaquelinevc/productos-api:latest"
+          mkdir -p build-logs
+          echo "=====================================" >> build-logs/docker-build.log
+          echo "Fecha: $(date)" >> build-logs/docker-build.log
+          echo "Rama: ${{ github.ref_name }}" >> build-logs/docker-build.log
+          echo "Commit: ${{ github.sha }}" >> build-logs/docker-build.log
+          echo "=====================================" >> build-logs/docker-build.log
+          echo "Validando docker-compose.yml..." >> build-logs/docker-build.log
+          docker compose config >> build-logs/docker-build.log 2>&1
+          echo "=====================================" >> build-logs/docker-build.log
+          echo "Imagenes publicadas:" >> build-logs/docker-build.log
+          echo "ghcr.io/jaquelinevc/inventarios-api:latest" >> build-logs/docker-build.log
+          echo "ghcr.io/jaquelinevc/productos-api:latest" >> build-logs/docker-build.log
+          echo "=====================================" >> build-logs/docker-build.log
+          cat build-logs/docker-build.log
+
+      - name: Guardar logs de build como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-build-logs
+          path: build-logs/
+          retention-days: 30
